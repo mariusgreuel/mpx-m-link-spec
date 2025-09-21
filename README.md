@@ -30,7 +30,7 @@ The CRC is a regular Dallas CRC8, with a random initial value that is transmitte
 
 The channel data packet contains the R/C channel values, i.e. the pulse-width information for the servos.
 
-In every channel data packet, three 16-bit channel values are transmitted. M-LINK can transmit up to sixteen channel values, for which six different PIDs are reserved. The channel values are encoded as follows:
+In every channel data packet, three 16-bit channel values are transmitted. M-LINK can transmit up to sixteen channels, for which six different PIDs are reserved. The channel values are encoded as follows:
 
   0 |  1  |  2  |  3  |  4  |  5  |  6  |  7
 ----|-----|-----|-----|-----|-----|-----|-----
@@ -38,18 +38,23 @@ PID | D1H | D1L | D2H | D2L | D3H | D3L | CRC
 
 DxH/DxL -> 16-bit channel value (high byte/low byte) **Dx**.
 
-The six PIDs and the channel indexes transmitted are shown in the table below:
+The 16-bit channel value **Dx** contains a 12-bit value that encodes the PPM pulse width, which ranges between 800us and 2200us (receiver limits to 2200us).
 
- PID | D1 | D2 | D3
------|----|----|----
-0x09 | 11 |  9 |  7
-0x01 | 12 | 10 |  8
-0x0A |  - | 15 | 13
-0x02 |  - | 16 | 14
-0x88 |  5 |  3 |  1
-0x80 |  6 |  4 |  2
+The six PIDs and the respective channel indexes transmitted are shown in the table below:
 
-The MSB of the channel data packet PID indicates the end of a cycle and a radio frequency change. The 16-bit channel value **Dx** contains a 12-bit value that encodes the PPM pulse width, which ranges between 800us and 2200us (receiver limits to 2200us).
+Group  | PID  | D1 | D2 | D3
+-------|------|----|----|----
+0-even | 0x88 |  5 |  3 |  1
+0-odd  | 0x80 |  6 |  4 |  2
+1-even | 0x09 | 11 |  9 |  7
+1-odd  | 0x01 | 12 | 10 |  8
+2-even | 0x0A |  - | 15 | 13
+2-odd  | 0x02 |  - | 16 | 14
+
+The PID seems to have a base value (group index) of 0, 1, and 2, and two special bits:
+
+- Bit 3 appears to indicate whether it is an even or odd group. Even and odd groups are sent alternately.
+- Bit 7 appears to indicate the end of a transmission cycle and a radio frequency change.
 
 ## Channel Data Word
 
@@ -84,7 +89,10 @@ Both modes support a telemetry return channel. The time slot for a receiver tele
 
 In normal mode (without a telemetry cycle), the following channel data packets (PIDs) are transmitted repeatedly:
 
-0x09, 0x0A, 0x88, 0x01, 0x02, 0x80
+```text
+0x09 0x0A 0x88
+0x01 0x02 0x80
+```
 
 The six packets above are split in two groups of three packets.
 Each group is transmitted in a 21ms transmission cycle.
@@ -106,28 +114,53 @@ Bit 7 of the PID indicates a radio frequency (channel) change, denoted by `Ch++`
 Every 5th cycle, a telemetry cycle is inserted. During a telemetry cycle,
 the radio is switched to RX mode giving the receiver a window to transmit data. In a telemetry cycle, only the following packets (PID) of a certain group are transmitted:
 
-0x09, 0x88 or 0x01, 0x80
+```text
+0x09 0x0A 0x88
+     0x01 0x80
+```
 
-Note that packets 0x0A/0x02 are omitted in a telemetry cycle, at the expense of channels 13 to 16. The time after packet 0x88/0x80 and before the packet 0x09/0x01 is the receive window, indicated by RX. The RX window is about 10ms long.
+or
+
+```text
+0x01 0x02 0x80
+     0x09 0x88
+```
+
+Note that packets 0x02 or 0x0A are omitted in a telemetry cycle, at the expense of channels 13 to 16. Which one of the two depends on whether the telemetry cycle occurs on an even or odd cycle. The time after packet 0x88/0x80 and before the packet 0x09/0x01 is the receive window, indicated by RX. The RX window is about 10ms long.
 
 A normal cycle followed by a telemetry cycle is shown below:
 
 ```text
-|~0x09/0x01~~~~~~~~|    |~0x0A/0x02~~~~~~~~|    |~0x88/0x80 ~~~~~~~| Ch++ [Rx~~~
+|~0x09~~~~~~~~~~~~~|    |~0x0A~~~~~~~~~~~~~|    |~0x88~~~~~~~~~~~~~| Ch++ [Rx~~~
 |-----------------------|-----------------------|------------------|------------|
 |0ms                    |6ms                    |12ms              |~17ms       |21ms
 
-|~~~~~~~~~~~~~~~~~~Rx]  |~0x09/0x01~~~~~~~~|    |~0x88/0x80 ~~~~~~~~| Ch++ 
+|~~~~~~~~~~~~~~~~~~Rx]  |~0x01~~~~~~~~~~~~~|    |~0x80~~~~~~~~~~~~~| Ch++ 
+|-----------------------|-----------------------|-------------------------------|
+|0ms                    |6ms                    |12ms                           |21ms
+```
+
+or
+
+```text
+|~0x01~~~~~~~~~~~~~|    |~0x02~~~~~~~~~~~~~|    |~0x80~~~~~~~~~~~~~| Ch++ [Rx~~~
+|-----------------------|-----------------------|------------------|------------|
+|0ms                    |6ms                    |12ms              |~17ms       |21ms
+
+|~~~~~~~~~~~~~~~~~~Rx]  |~0x09~~~~~~~~~~~~~|    |~0x88~~~~~~~~~~~~~| Ch++ 
 |-----------------------|-----------------------|-------------------------------|
 |0ms                    |6ms                    |12ms                           |21ms
 ```
 
 ### Fast-response (14ms cycle time, 12 channels)
 
-In fast-response mode, the 0x0A/0x02 packets are not included,
+In fast-response mode, the 0x02 and 0x0A packets are not included,
 i.e. the following packets (PID) are transmitted repeatedly:
 
-0x09, 0x88, 0x01, 0x80
+```text
+0x09 0x88
+0x01 0x80
+```
 
 The four packets above are split in two groups of two packets.
 Each group is transmitted in a 14ms transmission cycle.
@@ -146,16 +179,38 @@ To transmit all 12 channels, 4 packets in 2 cycles (28ms) are needed.
 
 Just like in normal mode, a telemetry cycle is inserted every 5th cycle. During a telemetry cycle, only the following packets (PID) are transmitted:
 
-0x88 or 0x80
+```text
+0x09 0x88
+     0x80
+```
 
-Note that packets 0x09/0x01 are omitted in a telemetry cycle, at the expense of channels 7 to 12.
+or
 
 ```text
-|~0x09/0x01~~~~~~~~|    |~0x88/0x80~~~~~~~~| Ch++ [Rx~~~
+0x01 0x80
+     0x88
+```
+
+Note that packets 0x01 or 0x09 are omitted in a telemetry cycle, at the expense of channels 7 to 12. Which one of the two depends on whether the telemetry cycle occurs on an even or odd cycle.
+
+```text
+|~0x09~~~~~~~~~~~~~|    |~0x88~~~~~~~~~~~~~| Ch++ [Rx~~~
 |-----------------------|------------------|------------|
 |0ms                    |6ms               |11ms        |14ms
 
-|~~~~~~~~~~~~~~~~~~Rx]  |~0x88/0x80~~~~~~~~| Ch++ 
+|~~~~~~~~~~~~~~~~~~Rx]  |~0x80~~~~~~~~~~~~~| Ch++ 
+|-----------------------|------------------|------------|
+|0ms                    |6ms               |11ms        |14ms
+```
+
+or
+
+```text
+|~0x01~~~~~~~~~~~~~|    |~0x80~~~~~~~~~~~~~| Ch++ [Rx~~~
+|-----------------------|------------------|------------|
+|0ms                    |6ms               |11ms        |14ms
+
+|~~~~~~~~~~~~~~~~~~Rx]  |~0x88~~~~~~~~~~~~~| Ch++ 
 |-----------------------|------------------|------------|
 |0ms                    |6ms               |11ms        |14ms
 ```
